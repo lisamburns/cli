@@ -83,12 +83,59 @@ func (requester *RealRequester) InitializeRouter(resources map[string]string) {
 }
 
 func (requester *RealRequester) MakeListRequest(requestParams RequestParams) (IncludedResources, Warnings, error) {
-	request, err := requester.buildRequest(requestParams)
-	if err != nil {
-		return IncludedResources{}, nil, err
+	maxBatchSize := 100
+	var result IncludedResources
+	var err error
+	var warnings Warnings
+
+	idx, paginateQueryParams := findQueryParam(requestParams)
+	if !paginateQueryParams {
+		request, err := requester.buildRequest(requestParams)
+		if err != nil {
+			return IncludedResources{}, nil, err
+		}
+		return requester.paginate(request, requestParams.ResponseBody, requestParams.AppendToList)
 	}
 
-	return requester.paginate(request, requestParams.ResponseBody, requestParams.AppendToList)
+	values := requestParams.Query[idx].Values
+	for len(values) > 0 {
+		fmt.Println(len(values))
+		remaining := len(values)
+		if remaining > maxBatchSize {
+			remaining = maxBatchSize
+		}
+		batch := values[:remaining-1]
+		values = values[remaining:]
+		requestParams.Query[0].Values = batch
+		request, err := requester.buildRequest(requestParams)
+		if err != nil {
+			return IncludedResources{}, nil, err
+		}
+		includedResources, newWarning, err := requester.paginate(request, requestParams.ResponseBody, requestParams.AppendToList)
+		result = appendIncludedResources(includedResources, result)
+		warnings = append(warnings, newWarning...)
+	}
+
+	return result, warnings, err
+}
+
+func appendIncludedResources(includes IncludedResources, results IncludedResources) IncludedResources {
+	includes.Users = append(includes.Users, results.Users...)
+	includes.Organizations = append(includes.Organizations, results.Organizations...)
+	includes.Spaces = append(includes.Spaces, results.Spaces...)
+	includes.ServiceOfferings = append(includes.ServiceOfferings, results.ServiceOfferings...)
+	includes.ServiceBrokers = append(includes.ServiceBrokers, results.ServiceBrokers...)
+	return includes
+}
+
+func findQueryParam(requestParams RequestParams) (int, bool) {
+	maxBatchSize := 100
+	for idx, query := range requestParams.Query {
+		if query.Key == AppGUIDFilter && len(query.Values) > maxBatchSize {
+			return idx, true
+		}
+	}
+	return 0, false
 }
 
 func (requester *RealRequester) MakeRequest(requestParams RequestParams) (JobURL, Warnings, error) {

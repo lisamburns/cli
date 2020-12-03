@@ -663,6 +663,74 @@ var _ = Describe("shared request helpers", func() {
 				})
 			})
 
+			When("the request has a query with too many values", func() {
+				var (
+					resources []Process
+				)
+
+				BeforeEach(func() {
+					appGUIDs := []string{}
+					for i := 0; i < 200; i++ {
+						appGUIDs = append(appGUIDs, fmt.Sprintf("app-guid-%d", i))
+					}
+
+					requestParams = RequestParams{
+						RequestName: internal.GetProcessesRequest,
+						Query: []Query{
+							Query{Key: "app_guids", Values: appGUIDs},
+						},
+						ResponseBody: Process{},
+						AppendToList: func(item interface{}) error {
+							resources = append(resources, item.(Process))
+							return nil
+						},
+					}
+
+					response1 := `{
+							"pagination": {
+								"next": null
+							},
+							 "resources": [
+							   {
+								 "guid": "process-guid-1"
+							   }
+							 ]
+						}`
+					response2 := `{
+							"pagination": {
+								"next": null
+							},
+							 "resources": [
+							   {
+								 "guid": "process-guid-2"
+							   }
+							 ]
+						}`
+
+					server.AppendHandlers(
+						CombineHandlers(
+							VerifyRequest(http.MethodGet, "/v3/processes"),
+							RespondWith(http.StatusOK, response1, http.Header{"X-Cf-Warnings": {"warning-1"}}),
+						),
+					)
+					server.AppendHandlers(
+						CombineHandlers(
+							VerifyRequest(http.MethodGet, "/v3/processes"),
+							RespondWith(http.StatusOK, response2, http.Header{"X-Cf-Warnings": {"warning-2"}}),
+						),
+					)
+				})
+
+				It("batches the requests", func() {
+					Expect(executeErr).ToNot(HaveOccurred())
+					// Expect(warnings).To(ConsistOf("warning-1", "warning-2"))
+					Expect(resources).To(Equal([]Process{{
+						GUID: "process-guid-1",
+					}, {
+						GUID: "process-guid-2",
+					}}))
+				})
+			})
 			When("the request has a URI parameter", func() {
 				var (
 					appGUID   string
